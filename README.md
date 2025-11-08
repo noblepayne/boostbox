@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="./images/v4vbox.png" alt="3D box with 'V4V' on one side." width="128">
+</div>
+
 # boostbox
 
 A simple API to store and serve boost metadata.
@@ -14,10 +18,10 @@ Boostbox is a Clojure project designed to provide a straightforward API for stor
 
 ## Technologies
 
-+ [Nix](https://nixos.org/)
-+ [Clojure](https://clojure.org/)
-+ [devenv](https://devenv.sh/)
-+ [clj-nix](https://jlesquembre.github.io/clj-nix/)
+- [Nix](https://nixos.org/)
+- [Clojure](https://clojure.org/)
+- [devenv](https://devenv.sh/)
+- [clj-nix](https://jlesquembre.github.io/clj-nix/)
 
 ### Clojure Libraries
 
@@ -28,7 +32,6 @@ Boostbox is a Clojure project designed to provide a straightforward API for stor
 - [muuntaja](https://github.com/metosin/muuntaja): HTTP format negotiation, encoding, and decoding
 - [reitit](https://github.com/metosin/reitit): HTTP routing
 
-
 ## Getting Started
 
 ### Prerequisites
@@ -38,7 +41,7 @@ Boostbox is a Clojure project designed to provide a straightforward API for stor
 ### Development
 
 1. Clone the repository.
-2. Enter the development environment:
+1. Enter the development environment:
 
 ```sh
 ./dev.sh
