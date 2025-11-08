@@ -12,9 +12,14 @@
             [jsonista.core :as json]
             [reitit.ring :as ring]
             [reitit.ring.middleware.muuntaja :as muuntaja]
-            [reitit.ring.middleware.parameters]
+            [reitit.ring.middleware.parameters :as parameters]
+            [reitit.ring.middleware.exception :as exception]
+            [reitit.ring.malli]
+            [reitit.ring.coercion :as coercion]
+            [reitit.coercion.malli]
             [clj-uuid :as uuid]
-            [boostbox.ulid :as ulid]))
+            [boostbox.ulid :as ulid]
+            [com.brunobonacci.mulog :as u]))
 
 ;; ~~~~~~~~~~~~~~~~~~~ Setup & Config ~~~~~~~~~~~~~~~~~~~
 (defmacro str$
@@ -127,23 +132,65 @@
   (store [_ id data] nil)
   (retrieve [_ id] nil))
 
+;; ~~~~~~~~~~~~~~~~ IStorage Utils ~~~~~~~~~~~~~~~~
+(defn make-storage [cfg]
+  (case  (:storage cfg)
+    "FS" (LocalStorage. (:root-path cfg))
+    "S3" (S3Storage. nil nil)))
+
 ;; ~~~~~~~~~~~~~~~~~~~ GET View ~~~~~~~~~~~~~~~~~~~
+(defn get-boost-by-id [cfg storage]
+  (fn [{{:keys [:id]} :path-params :as request}]
+    (if (not (valid-ulid? id))
+      {:status 400
+       :body {:error "invalid boost id" :id id}}
+      (try
+        {:status 200 :body (.retrieve storage id)}
+        (catch java.io.FileNotFoundException _
+          {:status 404 :body {:error "unknown boost" :id id}})))))
 
 ;; ~~~~~~~~~~~~~~~~~~~ POST View ~~~~~~~~~~~~~~~~~~~
+(defn valid-boost? [{:keys [:action] :as data}]
+  (#{"boost" "stream"} action))
+
+(defn add-boost [cfg storage]
+  (fn [{:keys [:body-params] :as request}]
+    (if-not (valid-boost? body-params)
+      {:status 400
+       :body {:error "invalid boost" :boost body-params}}
+      (let [id (gen-ulid)
+            url (str$ "/boost/~{id}")]
+        (try
+          (.store storage id body-params)
+          {:status 200
+           :body {:id id
+                  :url url}}
+          (catch Exception e
+            (do
+              (u/log ::add-boost-exception {:exception e :msg "exception adding boost"})
+              {:status 500
+               :body {:error "error during boost storage"}})))))))
 
 ;; ~~~~~~~~~~~~~~~~~~~ HTTP Server ~~~~~~~~~~~~~~~~~~~
 
-(defn routes [cfg]
+(defn routes [cfg storage]
   [["/" {:get {:handler (fn [_] {:status 200 :body cfg})}}]
-   ["/boost" {:post {:handler (fn [_] {:status 200 :body {:success true}})}}]])
+   ["/boost" {:post {:handler (add-boost cfg storage)}}]
+   ["/boost/:id" {:get {:handler (get-boost-by-id cfg storage)}}]])
 
-(defn http-handler [cfg]
+(defn http-handler [cfg storage]
   (ring/ring-handler
    (ring/router
-    (routes cfg)
+    (routes cfg storage)
     {:data {:muuntaja m/instance
-            :middleware [muuntaja/format-middleware
-                         reitit.ring.middleware.parameters/parameters-middleware]}})
+            :coercion reitit.coercion.malli/coercion
+            :middleware [parameters/parameters-middleware
+                         muuntaja/format-negotiate-middleware
+                         muuntaja/format-response-middleware
+                         #_exception/exception-middleware
+                         muuntaja/format-request-middleware
+                         coercion/coerce-response-middleware
+                         coercion/coerce-request-middleware]}})
    (ring/create-default-handler)))
 
 (defn make-virtual [f]
@@ -153,14 +200,17 @@
        (fn []
          (try
            (mf/success! deferred (apply f args))
-           (catch Exception e (mf/error! deferred e)))))
+           (catch Exception e (do
+                                (u/log :http/exception :msg "unhandled http exception" :exception e)
+                                #_(throw e)
+                                (mf/error! deferred e))))))
       deferred)))
 
 (defn serve
-  [cfg]
-  (let [env (or (System/getenv "ENV") "PROD")
+  [cfg storage]
+  (let [env (:env cfg)
         dev (= env "DEV")
-        handler-factory (fn [] (make-virtual (http-handler cfg)))
+        handler-factory (fn [] (make-virtual (http-handler cfg storage)))
         handler (if dev (ring/reloading-ring-handler handler-factory) (handler-factory))]
     (httpd/start-server
      handler
@@ -172,14 +222,17 @@
       :executor :none})))
 
 (defn -main [& _]
-  (let [cfg (config)]
-    (serve cfg)))
+  (let [cfg (config)
+        storage (make-storage cfg)
+        logger (u/start-publisher! {:type :console :pretty? true})
+        srv (serve cfg storage)]
+    {:srv srv :logger logger :config cfg :storage storage}))
+
+(defn stop [state]
+  (.close (:srv state))
+  ((:logger state)))
 
 (comment
-  (def server (-main))
-  (.close server)
-  (def mystorage (LocalStorage. "/tmp/boosts"))
-  (def myid (gen-ulid))
-  (.store mystorage myid {:abc 123 :bcd "234"})
-  (.retrieve mystorage myid)
-  (config))
+  (def state (-main))
+  (stop state)
+  state)
