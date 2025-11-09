@@ -266,28 +266,6 @@
                (let [response (handler request)]
                  (assoc-in response [:headers "Access-Control-Allow-Origin"] "*")))))})
 
-(def mulog-middleware
-  {:name ::mulog
-   :wrap (fn [handler]
-           (fn [{:keys [:request-method :uri :query-params :path-params :body-params] :as request}]
-             #_(u/log ::WES :request (keys request))
-             (let [correlation-id (gen-ulid)
-                   request (assoc request :correlation-id correlation-id)]
-               (u/trace ::http-request
-                        [:correlation-id correlation-id
-                         :method request-method
-                         :uri uri
-                         :query-params query-params
-                         :path-params path-params
-                         :body-params body-params]
-                        (let [response (handler request)
-                              status (:status response)
-                              response (assoc-in response [:headers "x-correlation-id"] correlation-id)]
-                          (u/log ::http-response
-                                 :status status
-                                 :success (< status 400))
-                          response)))))})
-
 (def exception-middleware
   {:name ::exception
    :wrap (fn [handler]
@@ -295,9 +273,8 @@
              (try
                (handler request)
                (catch Exception e
-                 (u/log ::http-exception
-                        :exception e)
                  {:status 500
+                  :exception e
                   :body {:error "internal server error"}}))))})
 
 (defn http-handler [cfg storage]
@@ -306,29 +283,62 @@
     (routes cfg storage)
     {:data {:muuntaja m/instance
             :coercion reitit.coercion.malli/coercion
-            :middleware [parameters/parameters-middleware
-                         muuntaja/format-negotiate-middleware
-                         muuntaja/format-response-middleware
-                         mulog-middleware
+            :middleware [muuntaja/format-response-middleware
                          exception-middleware
                          cors-middleware
+                         parameters/parameters-middleware
+                         muuntaja/format-negotiate-middleware
                          muuntaja/format-request-middleware
                          coercion/coerce-response-middleware
                          coercion/coerce-request-middleware]}})
    (ring/create-default-handler)))
 
+(defn correlation-id-wrapper [correlation-id handler]
+  (fn [request]
+    (let [request (assoc request :correlation-id correlation-id)
+          response (handler request)]
+      (assoc-in response [:headers "x-correlation-id"] correlation-id))))
+
+(defn mulog-wrapper [handler]
+  (fn [{:keys [:request-method :uri :query-params :path-params :body-params :correlation-id] :as request}]
+    (u/trace ::http-request
+             {:pairs [:correlation-id correlation-id
+                      :method request-method
+                      :uri uri
+                      :query-params query-params
+                      :path-params path-params
+                      :body-params body-params]
+              :capture (fn [{:keys [:status :exception] :as response}]
+                         (let [success (< status 400)
+                               base {:status status
+                                     :success success}]
+                           (if exception
+                             (assoc base :exception exception)
+                             base)))}
+             (handler request))))
+
 (defn make-virtual [f]
   (fn [& args]
-    (let [deferred (mf/deferred)]
+    (let [df (mf/deferred)
+          correlation-id (gen-ulid)
+          ;; wrap f with logging and correlation id
+          f' (correlation-id-wrapper correlation-id (mulog-wrapper f))]
       (Thread/startVirtualThread
        (fn []
          (try
-           (mf/success! deferred (apply f args))
-           (catch Exception e (do
-                                (u/log :http/exception :msg "unhandled http exception" :exception e)
-                                #_(throw e)
-                                (mf/error! deferred e))))))
-      deferred)))
+           (mf/success! df (apply f' args))
+           (catch Exception e
+             (u/log ::vthread-exception
+                    :exception e
+                    :method (:method args)
+                    :uri (:uri args)
+                    :status 500
+                    :correlation-id correlation-id)
+             (mf/success! df {:status 500
+                              :headers {"x-correlation-id" correlation-id
+                                        "content-type" "application/json"}
+                              :body "{\"error\": \"internal server error\"}"})))))
+      df)))
 
 (defn serve
   [cfg storage]
