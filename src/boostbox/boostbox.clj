@@ -19,7 +19,8 @@
             [reitit.coercion.malli]
             [clj-uuid :as uuid]
             [boostbox.ulid :as ulid]
-            [com.brunobonacci.mulog :as u]))
+            [com.brunobonacci.mulog :as u])
+  (:import java.net.URLEncoder))
 
 ;; ~~~~~~~~~~~~~~~~~~~ Setup & Config ~~~~~~~~~~~~~~~~~~~
 (defmacro str$
@@ -139,13 +140,57 @@
     "S3" (S3Storage. nil nil)))
 
 ;; ~~~~~~~~~~~~~~~~~~~ GET View ~~~~~~~~~~~~~~~~~~~
+(defn encode-header [data]
+  (let [json-str (json/write-value-as-string data)
+        ;; URL encode the entire JSON string
+        encoded (java.net.URLEncoder/encode json-str "UTF-8")]
+    encoded))
+(defn boost-view
+  "Renders RSS payment metadata in a simple HTML page with JSON display."
+  [data]
+  (let [json-pretty (json/write-value-as-string data (json/object-mapper {:pretty true}))
+        encoded (encode-header data)]
+    [html/doctype-html5
+     [:html
+      [:head
+       [:meta {:charset "utf-8"}]
+       [:meta {:name "viewport", :content "width=device-width, initial-scale=1"}]
+       [:meta {:name "color-scheme", :content "light dark"}]
+       [:title "RSS Payment Metadata"]
+       [:link {:rel "stylesheet" :href "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css"}]
+       [:link {:rel "stylesheet" :href "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/atom-one-dark.min.css"}]
+       [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"}]
+       [:style "pre { background: var(--form-element-background-color);
+                      border: 1px solid var(--form-element-border-color);
+                      padding: 1rem;
+                      border-radius: 6px;
+                      overflow-x: auto; }
+                code { font-size: 0.9rem; }"]]
+      [:body
+       [:main
+        [:h1 "RSS Payment Metadata"]
+        [:section
+         [:h2 "Payment Data"]
+         [:pre [:code {:class "language-json"} json-pretty]]]
+        [:section
+         [:h2 "Encoded Header"]
+         [:p "For x-rss-payment HTTP response header:"]
+         [:pre [:code {:class "language-json"} encoded]]]]
+       [:script "hljs.highlightAll();"]]]]))
+
 (defn get-boost-by-id [cfg storage]
   (fn [{{:keys [:id]} :path-params :as request}]
     (if (not (valid-ulid? id))
       {:status 400
        :body {:error "invalid boost id" :id id}}
       (try
-        {:status 200 :body (.retrieve storage id)}
+        (let [data (.retrieve storage id)
+              data-header (encode-header data)
+              data-hiccup (boost-view data)]
+          {:status 200
+           :headers {"x-rss-payment" data-header
+                     "content-type" "text/html; charset=utf-8"}
+           :body (html/html data-hiccup)})
         (catch java.io.FileNotFoundException _
           {:status 404 :body {:error "unknown boost" :id id}})))))
 
