@@ -50,7 +50,9 @@
         allowed-keys (into #{} (map str/trim (-> (get-env "BB_ALLOWED_KEYS" "v4v4me")
                                                  (str/split #","))))
         _ (assert (seq allowed-keys) "must specify at least one key in BB_ALLOWED_KEYS (comma separated)")
-        base-config {:env env :storage storage :port port :base-url base-url :allowed-keys allowed-keys}
+        max-body-size (Long/parseLong (get-env "BB_MAX_BODY" "102400"))
+        base-config {:env env :storage storage :port port :base-url base-url
+                     :allowed-keys allowed-keys :max-body-size max-body-size}
         storage-config (case storage
                          "FS" {:root-path (get-env "BB_FS_ROOT_PATH" "boosts")}
                          "S3" {:endpoint (get-env "BB_S3_ENDPOINT")
@@ -150,13 +152,17 @@
                main { max-width: 600px; margin: 0 auto; padding: 2rem; }
                h1 { margin-top: 1rem; }
                p { font-size: 1.1rem; color: var(--muted-color); margin: 1.5rem 0; }
-               a { margin-top: 1rem; }"]]
+               .button-group { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-top: 2rem; }
+               .button-group a { margin: 0; }"]]
         [:body
          [:main
           [:img {:src (str "data:image/png;base64," images/v4vbox)}]
           [:h1 "BoostBox"]
           [:p "A simple API to store and serve boost metadata"]
-          [:a {:href "https://github.com/noblepayne/boostbox", :role "button"} "View on GitHub"]]]]])}))
+          [:div.button-group
+           [:a {:href "/docs", :role "button"} "API Documentation"]
+           [:a {:href "/openapi.json", :role "button", :target "_blank"} "OpenAPI Spec"]
+           [:a {:href "https://github.com/noblepayne/boostbox", :role "button"} "View on GitHub"]]]]]])}))
 
 ;; ~~~~~~~~~~~~~~~~~~~ GET View ~~~~~~~~~~~~~~~~~~~
 (defn encode-header [data]
@@ -164,18 +170,19 @@
         ;; URL encode the entire JSON string
         encoded (URLEncoder/encode json-str "UTF-8")]
     encoded))
+
 (defn boost-view
   "Renders RSS payment metadata in a simple HTML page with JSON display."
   [data]
-  (let [json-pretty (json/write-value-as-string data (json/object-mapper {:pretty true}))
-        encoded (encode-header data)]
+  (let [boost-id (get data "id")
+        json-pretty (json/write-value-as-string data (json/object-mapper {:pretty true}))]
     [html/doctype-html5
      [:html
       [:head
        [:meta {:charset "utf-8"}]
        [:meta {:name "viewport", :content "width=device-width, initial-scale=1"}]
        [:meta {:name "color-scheme", :content "light dark"}]
-       [:title "RSS Payment Metadata"]
+       [:title (str "BoostBox Boost " boost-id)]
        [:link {:rel "icon" :type "image/png" :href (str "data:image/png;base64," images/favicon)}]
        [:link {:rel "stylesheet" :href "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css"}]
        [:link {:rel "stylesheet" :href "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/atom-one-dark.min.css"}]
@@ -188,14 +195,10 @@
                 code { font-size: 0.9rem; }"]]
       [:body
        [:main
-        [:h1 "RSS Payment Metadata"]
+        [:h1 "BoostBox Metadata Viewer"]
         [:section
-         [:h2 "Payment Data"]
-         [:pre [:code {:class "language-json"} json-pretty]]]
-        [:section
-         [:h2 "Encoded Header"]
-         [:p "For x-rss-payment HTTP response header:"]
-         [:pre [:code {:class "language-json"} encoded]]]]
+         [:h2 "Boost " boost-id]
+         [:pre [:code {:class "language-json"} json-pretty]]]]
        [:script "hljs.highlightAll();"]]]]))
 
 (defn get-boost-by-id [cfg storage]
@@ -241,7 +244,7 @@
 (defn auth-middleware [allowed-keys]
   (fn [handler]
     (fn [request]
-      (if (allowed-keys (get-in request [:headers :bearer]))
+      (if (allowed-keys (get-in request [:headers :x-api-key]))
         (handler request)
         {:status 401
          :body {:error :unauthorized}}))))
@@ -253,7 +256,7 @@
                                             :description "simple API to store boost metadata"}
                                      :securityDefinitions {"auth" {:type :apiKey
                                                                    :in :header
-                                                                   :name "Bearer"}}}}}]
+                                                                   :name "x-api-key"}}}}}]
    ["/health" {:get {:handler (fn [_] {:status 200 :body {:status :ok}})
                      :summary "healthcheck"
                      :responses {200 {:body [:map [:status [:enum :ok]]]}}}}]
@@ -292,6 +295,18 @@
    :exception e
    :body {:error "internal server error"}})
 
+(defn body-size-limiter-middleware [max-body-size]
+  (fn [handler]
+    (fn [request]
+      (let
+       [body-stream (:body request)
+        body-bytes (when body-stream (-> body-stream slurp .getBytes))
+        body-size (if body-stream (alength body-bytes) 0)
+        request (if body-stream (assoc request :body (java.io.ByteArrayInputStream. body-bytes)) request)]
+        (if (< max-body-size body-size)
+          {:status 413 :body {:error "payload too large"}}
+          (handler request))))))
+
 (defn http-handler [cfg storage]
   (ring/ring-handler
    (ring/router
@@ -300,14 +315,16 @@
             :coercion reitit.coercion.malli/coercion
             :middleware [swagger/swagger-feature
                          parameters/parameters-middleware
-                         cors-middleware
                          muuntaja/format-negotiate-middleware
+                         ;; end of response middleware
                          muuntaja/format-response-middleware
                          (exception/create-exception-middleware
                           (assoc exception/default-handlers
                                  ;; replace default handler with ours
                                  ::exception/default
                                  default-exception-handler))
+                         (body-size-limiter-middleware (:max-body-size cfg))
+                         cors-middleware
                          muuntaja/format-request-middleware
                          coercion/coerce-response-middleware
                          coercion/coerce-request-middleware]}})
@@ -395,6 +412,7 @@
                                  (Thread/sleep 500)
                                  (logger)
                                  (Thread/sleep 500))))
+    (u/log ::app-starting-up :app "BoostBox")
     {:srv srv :logger logger :config cfg :storage storage}))
 
 (defn stop [state]
