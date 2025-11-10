@@ -22,7 +22,8 @@
             [boostbox.ulid :as ulid]
             [com.brunobonacci.mulog :as u]
             [boostbox.images :as images]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [malli.util :as mu])
   (:import java.net.URLEncoder))
 
 ;; ~~~~~~~~~~~~~~~~~~~ Setup & Config ~~~~~~~~~~~~~~~~~~~
@@ -164,6 +165,47 @@
            [:a {:href "/openapi.json", :role "button", :target "_blank"} "OpenAPI Spec"]
            [:a {:href "https://github.com/noblepayne/boostbox", :role "button"} "View on GitHub"]]]]]])}))
 
+;; ~~~~~~~~~~~~~~~~~~~ Boost Schemas ~~~~~~~~~~~~~~~~~~~
+
+(defn valid-iso8601? [s]
+  (try
+    (java.time.Instant/parse s)
+    true
+    (catch Exception _ false)))
+
+(def BoostMetadata
+  [:map
+   ;; provided by us
+   #_[:id {:optional true} :string]
+   ;; provided by boost client
+   [:action [:enum :boost :stream]]
+   [:split {:json-schema/default 1.0} [:double {:min 0.0}]]
+   [:value_msat {:json-schema/default 2222000} [:int {:min 1}]]
+   [:value_msat_total {:json-schema/default 2222000} [:int {:min 1}]]
+   [:timestamp {:json-schema/default (java.time.Instant/now)}
+    [:and :string
+     [:fn {:error/message "must be ISO-8601"} valid-iso8601?]]]
+   ;; optional  keys
+   [:group {:optional true} :string]
+   [:message {:optional true :json-schema/default "row of ducks"} :string]
+   [:app_name {:optional true} :string]
+   [:app_version {:optional true} :string]
+   [:sender_id {:optional true} :string]
+   [:sender_name {:optional true} :string]
+   [:recipient_name {:optional true} :string]
+   [:recipient_address {:optional true} :string]
+   [:value_usd {:optional true} [:double {:min 0.0}]]
+   [:position {:optional true} :int]
+   [:feed_guid {:optional true} :string]
+   [:feed_title {:optional true} :string]
+   [:item_guid {:optional true} :string]
+   [:item_title {:optional true} :string]
+   [:publisher_guid {:optional true} :string]
+   [:publisher_title {:optional true} :string]
+   [:remote_feed_guid {:optional true} :string]
+   [:remote_item_guid {:optional true} :string]
+   [:remote_publisher_guid {:optional true} :string]])
+
 ;; ~~~~~~~~~~~~~~~~~~~ GET View ~~~~~~~~~~~~~~~~~~~
 (defn encode-header [data]
   (let [json-str (json/write-value-as-string data)
@@ -203,42 +245,56 @@
 
 (defn get-boost-by-id [cfg storage]
   (fn [{{:keys [:id]} :path-params :as request}]
-    (if (not (valid-ulid? id))
-      {:status 400
-       :body {:error "invalid boost id" :id id}}
-      (try
-        (let [data (.retrieve storage id)
-              data-header (encode-header data)
-              data-hiccup (boost-view data)]
-          {:status 200
-           :headers {"x-rss-payment" data-header
-                     "content-type" "text/html; charset=utf-8"}
-           :body (html/html data-hiccup)})
-        (catch java.io.FileNotFoundException _
-          {:status 404 :body {:error "unknown boost" :id id}})))))
+    (try
+      (let [data (.retrieve storage id)
+            data-header (encode-header data)
+            data-hiccup (boost-view data)]
+        {:status 200
+         :headers {"x-rss-payment" data-header
+                   "content-type" "text/html; charset=utf-8"}
+         :body (html/html data-hiccup)})
+      (catch java.io.FileNotFoundException _
+        {:status 404 :body {:error "unknown boost" :id id}}))))
 
 ;; ~~~~~~~~~~~~~~~~~~~ POST View ~~~~~~~~~~~~~~~~~~~
-(defn valid-boost? [{:keys [:action] :as data}]
-  (#{"boost" "stream"} action))
+
+(defn bolt11-desc [action url message]
+  (if-let [s (seq message)]
+    (let [s-len (count s)
+          action-len (count action)
+          url-len (count url)
+          ;; n.b. bolt11 max is 640, rss:payment:: + two spaces is 16; 640 - 16 = 624
+          max-desc-len (- 624 url-len action-len)
+          ;; truncate to fit in desc
+          truncd-s (take max-desc-len s)
+          truncd-s-len (count truncd-s)
+          ;; when truncated replace last 3 digits to ... to indicate truncation
+          new-s (if (<= 0 truncd-s-len 2)
+                  ""
+                  (if (< truncd-s-len s-len)
+                    (concat (take (- max-desc-len 3) truncd-s) "...")
+                    truncd-s))
+          new-message (str/join new-s)]
+      (str "rss::payment::" action " " url " " new-message))
+    (str "rss::payment::" action " " url)))
 
 (defn add-boost [cfg storage]
   (fn [{:keys [:body-params] :as request}]
-    (if-not (valid-boost? body-params);
-      {:status 400
-       :body {:error "invalid boost" :boost body-params}}
-      (let [id (gen-ulid)
-            url (str (:base-url cfg) "/boost/" id)
-            boost (assoc body-params :id id)]
-        (try
-          (.store storage id boost)
-          {:status 201
-           :body {:id id
-                  :url url}}
-          (catch Exception e
-            (do
-              (u/log ::add-boost-exception {:exception e :msg "exception adding boost"})
-              {:status 500
-               :body {:error "error during boost storage"}})))))))
+    (let [id (gen-ulid)
+          url (str (:base-url cfg) "/boost/" id)
+          boost (assoc body-params :id id)
+          desc (bolt11-desc (:action boost) url (:message boost))]
+      (try
+        (.store storage id boost)
+        {:status 201
+         :body {:id id
+                :url url
+                :desc desc}}
+        (catch Exception e
+          (do
+            (u/log ::add-boost-exception {:exception e :msg "exception adding boost"})
+            {:status 500
+             :body {:error "error during boost storage"}}))))))
 
 ;; ~~~~~~~~~~~~~~~~~~~ HTTP Server ~~~~~~~~~~~~~~~~~~~
 (defn auth-middleware [allowed-keys]
@@ -254,21 +310,27 @@
    ["/openapi.json" {:get {:no-doc true :handler (swagger/create-swagger-handler)
                            :swagger {:info {:title "BoostBox API"
                                             :description "simple API to store boost metadata"}
+                                     :tags [{:name "boosts" :description "boost api"}
+                                            {:name "admin" :description "admin api"}]
                                      :securityDefinitions {"auth" {:type :apiKey
                                                                    :in :header
                                                                    :name "x-api-key"}}}}}]
    ["/health" {:get {:handler (fn [_] {:status 200 :body {:status :ok}})
+                     :tags #{"admin"}
                      :summary "healthcheck"
                      :responses {200 {:body [:map [:status [:enum :ok]]]}}}}]
    ["/boost" {:post {:handler (add-boost cfg storage)
+                     :tags #{"boosts"}
                      :middleware [(auth-middleware (:allowed-keys cfg))]
                      :summary "Store boost metadata"
                      :swagger {:security [{"auth" []}]}
-                     :parameters {:body [:map [:action [:enum "boost" "stream"]]]}
-                     :responses {201 {:body [:map [:id :string] [:url :string]]}}}}]
+                     :parameters {:body BoostMetadata}
+                     :responses {201 {:body [:map [:id :string] [:url :string] [:desc :string]]}}}}]
    ["/boost/:id" {:get {:handler (get-boost-by-id cfg storage)
+                        :tags #{"boosts"}
                         :summary "lookup boost by id"
-                        :parameters {:path {:id :string}}
+                        :parameters {:path {:id [:and :string
+                                                 [:fn {:error/message "must be valid ULID"} valid-ulid?]]}}
                         :responses {200 {:body :string}
                                     400 {:body [:map [:error :string] [:id :string]]}
                                     401 {:body [:map [:error :string] [:id :string]]}
@@ -312,7 +374,10 @@
    (ring/router
     (routes cfg storage)
     {:data {:muuntaja m/instance
-            :coercion reitit.coercion.malli/coercion
+            :coercion (reitit.coercion.malli/create
+                       {:error-keys #{:in :humanized}
+                        :compile mu/open-schema
+                        :default-values true})
             :middleware [swagger/swagger-feature
                          parameters/parameters-middleware
                          muuntaja/format-negotiate-middleware
