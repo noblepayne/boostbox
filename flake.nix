@@ -111,6 +111,9 @@
         tag = "latest";
         config = {
           Entrypoint = ["${self.packages.${system}.default}/bin/boostbox"];
+          ExposedPorts = {
+            "8080" = {};
+          };
         };
       };
       default = clj-nix.lib.mkCljApp {
