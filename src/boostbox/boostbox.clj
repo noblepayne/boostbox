@@ -213,11 +213,34 @@
         encoded (URLEncoder/encode json-str "UTF-8")]
     encoded))
 
+(defn format-sats
+  "Convert millisatoshis to satoshis with comma formatting"
+  [value-msat]
+  (when value-msat
+    (let [sats (Math/round (double (/ value-msat 1000)))
+          formatter (java.text.DecimalFormat. "#,##0")]
+      (.format formatter sats))))
+
+(defn boost-metadata-row
+  "Renders a single metadata row if value exists"
+  [label value]
+  (when value
+    [:div.boost-field
+     [:strong.boost-label label]
+     [:span.boost-value value]]))
+
 (defn boost-view
   "Renders RSS payment metadata in a simple HTML page with JSON display."
   [data]
   (let [boost-id (get data "id")
-        json-pretty (json/write-value-as-string data (json/object-mapper {:pretty true}))]
+        json-pretty (json/write-value-as-string data (json/object-mapper {:pretty true}))
+        sender-name (get data "sender_name")
+        value-msats (get data "value_msat")
+        sats (format-sats value-msats)
+        feed-title (get data "feed_title")
+        item-title (get data "item_title")
+        app-name (get data "app_name")
+        message (get data "message")]
     [html/doctype-html5
      [:html
       [:head
@@ -234,12 +257,37 @@
                       padding: 1rem;
                       border-radius: 6px;
                       overflow-x: auto; }
-                code { font-size: 0.9rem; }"]]
+                code { font-size: 0.9rem; }
+                .boost-card { border: 1px solid var(--form-element-border-color);
+                              padding: 1.5rem;
+                              border-radius: 6px;
+                              background: var(--card-background-color, transparent); }
+                .boost-field { display: grid;
+                               grid-template-columns: minmax(100px, max-content) 1fr;
+                               gap: 1rem;
+                               align-items: start;
+                               padding: 0.75rem 0;
+                               border-bottom: 1px solid var(--form-element-border-color); }
+                .boost-field:last-child { border-bottom: none; }
+                .boost-field strong { color: var(--muted-color); }
+                .boost-label { font-weight: 600;
+                               white-space: nowrap; }
+                .boost-value { word-break: break-word; }"]]
       [:body
        [:main
-        [:h1 "BoostBox Metadata Viewer"]
+        [:h1 "Boost Viewer"]
         [:section
-         [:h2 "Boost " boost-id]
+         [:article.boost-card
+          [:h3 "Boost Details"]
+          (boost-metadata-row "ID:" boost-id)
+          (boost-metadata-row "From:" sender-name)
+          (boost-metadata-row "Amount:" (str sats " sats"))
+          (boost-metadata-row "Show:" feed-title)
+          (boost-metadata-row "Episode:" item-title)
+          (boost-metadata-row "App:" app-name)
+          (boost-metadata-row "Message:" message)]]
+        [:section
+         [:h3 "Metadata"]
          [:pre [:code {:class "language-json"} json-pretty]]]]
        [:script "hljs.highlightAll();"]]]]))
 
