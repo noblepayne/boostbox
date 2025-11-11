@@ -23,9 +23,23 @@
          danlentz/clj-uuid {:mvn/version "0.2.0"}
          ;; S3
          com.cognitect.aws/api {:mvn/version "0.8.774"}
-         com.cognitect.aws/endpoints {:mvn/version "871.2.37.4"}
+         com.cognitect.aws/endpoints {:mvn/version "871.2.38.3"}
          com.cognitect.aws/s3 {:mvn/version "871.2.37.4"}}
  :aliases {:neil {:project {:name com.noblepayne/boostbox}}
+           :repl {:extra-paths ["dev"]
+                  :extra-deps {cider/cider-nrepl {:mvn/version "0.58.0"}
+                               nrepl/nrepl {:mvn/version "1.5.1"}
+                               lambdaisland/kaocha {:mvn/version "1.91.1392"}
+                               org.clojure/test.check {:mvn/version "1.1.1"}}
+                  :jvm-opts ["-Djdk.attach.allowAttachSelf" "-XX:+EnableDynamicAgentLoading"]}
+           :test {:extra-paths ["test"]
+                  :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
+                               org.clojure/test.check {:mvn/version "1.1.1"}}
+                  :main-opts ["-m" "kaocha.runner"]}
+           :test/watch {:extra-paths ["test"]
+                        :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
+                                     org.clojure/test.check {:mvn/version "1.1.1"}}
+                        :main-opts ["-m" "kaocha.runner" "--watch"]}
            :outdated {;; Note that it is `:deps`, not `:extra-deps`
                       :deps {com.github.liquidz/antq {:mvn/version "RELEASE"}}
                       ;; TODO: correct replacement? Currently handled by script

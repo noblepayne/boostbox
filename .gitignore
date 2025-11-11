@@ -8,3 +8,4 @@
 result
 *.tar*
 boosts
+logs.test.txt
