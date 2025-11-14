@@ -6,6 +6,10 @@
 
 A simple, lightweight, and self-hostable API for storing and retrieving [Podcasting 2.0](https://podcasting2.org/) payment metadata.
 
+Demo: [boostbox.noblepayne.com](https://boostbox.noblepayne.com)
+
+Demo Boost: [01K9RJ1ZDFE2GV7Z0VKDVT3V6M](https://boostbox.noblepayne.com/boost/01K9RJ1ZDFE2GV7Z0VKDVT3V6M)
+
 ______________________________________________________________________
 
 ## What is BoostBox?
