@@ -402,10 +402,9 @@
                 :url url
                 :desc desc}}
         (catch Exception e
-          (do
-            (u/log ::add-boost-exception {:exception e :msg "exception adding boost"})
-            {:status 500
-             :body {:error "error during boost storage"}}))))))
+          {:status 500
+           ::exception e
+           :body {:error "error during boost storage"}})))))
 
 ;; ~~~~~~~~~~~~~~~~~~~ HTTP Server ~~~~~~~~~~~~~~~~~~~
 (defn auth-middleware [allowed-keys]
@@ -426,7 +425,8 @@
                                             {:name "admin" :description "admin api"}]
                                      :securityDefinitions {"auth" {:type :apiKey
                                                                    :in :header
-                                                                   :name "x-api-key"}}}}}]
+                                                                   :name "x-api-key"}}
+                                     :definitions {}}}}]
    ["/health" {:get {:handler (fn [_] {:status 200 :body {:status :ok}})
                      :tags #{"admin"}
                      :summary "healthcheck"
@@ -517,7 +517,7 @@
       (handler request)
       (catch Exception e
         {:status 500
-         :exception e
+         ::exception e
          :headers {"content-type" "application/json"}
          :body "{\"error\": \"internal server error\"}"}))))
 
