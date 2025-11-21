@@ -144,6 +144,8 @@ Make sure to configure your `.env` file with required environment variables (see
 
 Configuration is handled via environment variables.
 
+### Core Configuration
+
 | Variable | Required | Default | Description |
 | -------------------- | :------: | --------------------- | ------------------------------------------------------------------------------------------------------- |
 | `ENV` | No | `DEV` | The runtime environment: `DEV`, `STAGING`, or `PROD`. |
@@ -151,10 +153,52 @@ Configuration is handled via environment variables.
 | `BB_BASE_URL` | No | `http://localhost:8080` | The public base URL of the service (e.g., `https://my-boostbox.com`). Used to construct response URLs. |
 | `BB_ALLOWED_KEYS` | No | `v4v4me` | Comma-separated list of API keys clients must provide in the `X-Api-Key` header to use the `POST /boost` endpoint. |
 | `BB_MAX_BODY` | No | `102400` | Maximum allowed size for request bodies in bytes (approximately 100KB by default). |
-| `BB_STORAGE` | No | `FS` | The backend for storing metadata: `FS` (filesystem) or `S3`. Currently only `FS` is implemented. |
+| `BB_STORAGE` | No | `FS` | The backend for storing metadata: `FS` (filesystem) or `S3`. |
+
+### Filesystem Storage Configuration
+
+| Variable | Required | Default | Description |
+| -------------------- | :------: | --------------------- | ------------------------------------------------------------------------------------------------------- |
 | `BB_FS_ROOT_PATH` | No | `boosts` | If `BB_STORAGE=FS`, the root directory where metadata files will be stored. |
 
-**Note:** S3 storage is planned for a future release and is not yet implemented.
+### S3 Storage Configuration
+
+To use S3 storage (AWS S3, MinIO, or compatible), set `BB_STORAGE=S3` and configure the following:
+
+| Variable | Required | Default | Description |
+| -------------------- | :------: | --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `BB_S3_ENDPOINT` | Yes | N/A | The S3 endpoint URL (e.g., `https://s3.amazonaws.com` or `http://localhost:9000` for MinIO). Must include protocol. |
+| `BB_S3_REGION` | Yes | N/A | AWS region (e.g., `us-east-1`). |
+| `BB_S3_ACCESS_KEY` | Yes | N/A | S3 access key ID. |
+| `BB_S3_SECRET_KEY` | Yes | N/A | S3 secret access key. |
+| `BB_S3_BUCKET` | Yes | N/A | S3 bucket name. |
+
+### S3 Setup Examples
+
+**Using AWS S3:**
+
+```sh
+export BB_STORAGE=S3
+export BB_S3_REGION=us-east-1
+export BB_S3_ACCESS_KEY=your-aws-access-key
+export BB_S3_SECRET_KEY=your-aws-secret-key
+export BB_S3_BUCKET=my-boostbox-bucket
+./result/bin/boostbox
+```
+
+**Using MinIO locally:**
+
+```sh
+export BB_STORAGE=S3
+export BB_S3_ENDPOINT=http://localhost:9000
+export BB_S3_REGION=us-east-1
+export BB_S3_ACCESS_KEY=minioadmin
+export BB_S3_SECRET_KEY=minioadmin
+export BB_S3_BUCKET=boostbox
+./result/bin/boostbox
+```
+
+The included `flake.nix` dev environment provides MinIO. Run `devenv up` to start it for manual testing. This is done automatically for `./tests.sh`.
 
 ## API Quick Reference
 

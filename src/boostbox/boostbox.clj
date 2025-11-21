@@ -7,24 +7,25 @@
             [cognitect.aws.credentials :as aws-creds]
             [dev.onionpancakes.chassis.core :as html]
             [manifold.deferred :as mf]
-            [muuntaja.core :as m]
+            [muuntaja.core :as muuntaja]
             [jsonista.core :as json]
             [reitit.ring :as ring]
             [reitit.ring.malli]
             [reitit.ring.coercion :as coercion]
-            [reitit.ring.middleware.muuntaja :as muuntaja]
+            [reitit.ring.middleware.muuntaja :as muuntaja-middleware]
             [reitit.ring.middleware.parameters :as parameters]
             [reitit.ring.middleware.exception :as exception]
             [reitit.swagger :as swagger]
             [reitit.swagger-ui :as swagger-ui]
             [reitit.coercion.malli]
+            [ring.util.codec :as rcodec]
             [clj-uuid :as uuid]
             [boostbox.ulid :as ulid]
             [com.brunobonacci.mulog :as u]
             [boostbox.images :as images]
             [clojure.string :as str]
-            [malli.util :as mu])
-  (:import java.net.URLEncoder))
+            [malli.core :as m]
+            [malli.util :as mu]))
 
 ;; ~~~~~~~~~~~~~~~~~~~ Setup & Config ~~~~~~~~~~~~~~~~~~~
 (defn get-env
@@ -39,6 +40,25 @@
 (defn assert-in-set [allowed val]
   (let [valid? (allowed val)]
     (assert valid? (str "Invalid value: " val ", allowed: " allowed))))
+
+(def S3Endpoint
+  [:map
+   [:protocol [:enum :http :https]]
+   [:hostname [:string {:min 1}]]
+   [:port {:optional true} [:int {:min 1 :max 65535}]]])
+
+(defn parse-s3-endpoint [url-string]
+  (let [uri (java.net.URI. url-string)
+        data {:protocol (keyword (.getScheme uri))
+              :hostname (.getHost uri)}
+        port (let [p (.getPort uri)] (when (pos? p) p))
+        data (if port (assoc data :port port) data)]
+    (if (m/validate S3Endpoint data)
+      data
+      (throw (ex-info "Invalid S3 endpoint configuration"
+                      {:cognitect.anomalies/category :cognitect.anomalies/incorrect
+                       :url url-string
+                       :errors (m/explain S3Endpoint data)})))))
 
 (defn config []
   (let [env (get-env "ENV" "PROD")
@@ -56,7 +76,7 @@
                      :allowed-keys allowed-keys :max-body-size max-body-size}
         storage-config (case storage
                          "FS" {:root-path (get-env "BB_FS_ROOT_PATH" "boosts")}
-                         "S3" {:endpoint (get-env "BB_S3_ENDPOINT")
+                         "S3" {:endpoint (parse-s3-endpoint (get-env "BB_S3_ENDPOINT"))
                                :region (get-env "BB_S3_REGION")
                                :access-key (get-env "BB_S3_ACCESS_KEY")
                                :secret-key (get-env "BB_S3_SECRET_KEY")
@@ -111,27 +131,65 @@
     (let [timestamp (ulid/ulid->timestamp id)
           prefix (timestamp->prefix timestamp)
           input-file (io/file root-path prefix (str id ".json"))]
-      (json/read-value input-file))))
+      (try
+        (json/read-value input-file)
+        (catch java.io.FileNotFoundException e
+          (throw (ex-info "File not found during LocalStorage retrieve"
+                          {:cognitect.anomalies/category :cognitect.anomalies/not-found :exception e})))))))
 
 ;; ~~~~~~~~~~~~~~~~~~~ S3 ~~~~~~~~~~~~~~~~~~~
-(defn s3-client [endpoint region access-key secret-key]
-  (aws/client {:api :s3
-               :region region
-               :endpoint-override {:protocol :https :hostname endpoint}
-               :credentials-provider
-               (aws-creds/basic-credentials-provider
-                {:access-key-id access-key
-                 :secret-access-key secret-key})}))
+(defn s3-client
+  [access-key secret-key region endpoint-override]
+  (aws/client (merge
+               (if region
+                 {:region region}
+                 {:region "us-east-1"})
+               (when endpoint-override
+                 {:endpoint-override endpoint-override})
+               {:api :s3
+                :credentials-provider
+                (aws-creds/basic-credentials-provider
+                 {:access-key-id access-key
+                  :secret-access-key secret-key})})))
+
+(defn s3-put [s3c bucket-name key-name content-type content]
+  (aws/invoke s3c {:op :PutObject
+                   :request {:Bucket bucket-name
+                             :Key key-name
+                             :Body (.getBytes content "UTF-8")
+                             :ContentType content-type}}))
+(defn s3-get [s3c bucket-name key-name]
+  (aws/invoke s3c {:op :GetObject
+                   :request {:Bucket bucket-name
+                             :Key key-name}}))
+
 (defrecord S3Storage [client bucket]
   IStorage
-  (store [_ id data] (throw (ex-info "not implemented yet!" {:type "S3"})))
-  (retrieve [_ id] (throw (ex-info "not implemented yet!" {:type "S3"}))))
+  (store [_ id data]
+    (let [timestamp (ulid/ulid->timestamp id)
+          prefix (timestamp->prefix timestamp)
+          output-file (str prefix "/" id ".json")
+          response (s3-put client bucket output-file "application/json"
+                           (json/write-value-as-string data))]
+      (when (contains? response :cognitect.anomalies/category)
+        (throw (ex-info "AWS Error during S3Storage store" response)))))
+  (retrieve [_ id]
+    (let [timestamp (ulid/ulid->timestamp id)
+          prefix (timestamp->prefix timestamp)
+          input-file (str prefix "/" id ".json")
+          get-response (s3-get client bucket input-file)]
+      (if (contains? get-response :cognitect.anomalies/category)
+        (throw (ex-info "AWS Error during S3Storage retrieve" get-response))
+        (json/read-value (:Body get-response))))))
 
 ;; ~~~~~~~~~~~~~~~~ IStorage Utils ~~~~~~~~~~~~~~~~
+
 (defn make-storage [cfg]
   (case  (:storage cfg)
     "FS" (LocalStorage. (:root-path cfg))
-    "S3" (S3Storage. nil nil)))
+    "S3" (let [{:keys [:access-key :secret-key :region :endpoint :bucket]} cfg
+               client  (s3-client access-key secret-key region endpoint)]
+           (S3Storage. client bucket))))
 
 ;; ~~~~~~~~~~~~~~~~~~~ Homepage ~~~~~~~~~~~~~~~~~~~
 (defn homepage []
@@ -209,11 +267,7 @@
 ;; ~~~~~~~~~~~~~~~~~~~ GET View ~~~~~~~~~~~~~~~~~~~
 (defn encode-header [data]
   (let [json-str (json/write-value-as-string data)
-        ;; URL encode the entire JSON string, swap + for %20
-        encoded (.replace
-                 (URLEncoder/encode json-str "UTF-8")
-                 "+"
-                 "%20")]
+        encoded (rcodec/url-encode json-str)]
     encoded))
 
 (defn format-sats
@@ -305,8 +359,11 @@
                    "x-rss-payment" data-header
                    "content-type" "text/html; charset=utf-8"}
          :body (html/html data-hiccup)})
-      (catch java.io.FileNotFoundException _
-        {:status 404 :body {:error "unknown boost" :id id}}))))
+      (catch clojure.lang.ExceptionInfo e
+        (let [{:keys [:cognitect.anomalies/category]} (ex-data e)]
+          (if (= category :cognitect.anomalies/not-found)
+            {:status 404 :body {:error "unknown boost" :id id}}
+            (throw e)))))))
 
 ;; ~~~~~~~~~~~~~~~~~~~ POST View ~~~~~~~~~~~~~~~~~~~
 
@@ -315,19 +372,21 @@
     (let [s-len (count s)
           action-len (count action)
           url-len (count url)
-          ;; n.b. bolt11 max is 640, rss:payment:: + two spaces is 16; 640 - 16 = 624
-          max-desc-len (- 624 url-len action-len)
+          ;; n.b. bolt11 max is 639, rss:payment:: + two spaces is 16; 639 - 16 = 623
+          max-desc-len (max 0 (- 623 url-len action-len))
           ;; truncate to fit in desc
           truncd-s (take max-desc-len s)
           truncd-s-len (count truncd-s)
           ;; when truncated replace last 3 digits to ... to indicate truncation
-          new-s (if (<= 0 truncd-s-len 2)
+          new-s (if (<= truncd-s-len 2)
                   ""
                   (if (< truncd-s-len s-len)
-                    (concat (take (- max-desc-len 3) truncd-s) "...")
+                    (concat (take (- truncd-s-len 3) truncd-s) "...")
                     truncd-s))
-          new-message (str/join new-s)]
-      (str "rss::payment::" action " " url " " new-message))
+          new-message (str/join new-s)
+          ;; only add space if message is non-empty
+          separator (if (seq new-message) " " "")]
+      (str "rss::payment::" action " " url separator new-message))
     (str "rss::payment::" action " " url)))
 
 (defn add-boost [cfg storage]
@@ -361,7 +420,8 @@
   [["/" {:get {:no-doc true :handler (homepage)}}]
    ["/openapi.json" {:get {:no-doc true :handler (swagger/create-swagger-handler)
                            :swagger {:info {:title "BoostBox API"
-                                            :description "simple API to store boost metadata"}
+                                            :description "simple API to store boost metadata"
+                                            :version "0.1.0"}
                                      :tags [{:name "boosts" :description "boost api"}
                                             {:name "admin" :description "admin api"}]
                                      :securityDefinitions {"auth" {:type :apiKey
@@ -414,7 +474,7 @@
     (fn [request]
       (let
        [body-stream (:body request)
-        body-bytes (when body-stream (-> body-stream slurp .getBytes))
+        body-bytes (when body-stream (-> body-stream slurp (.getBytes "UTF-8")))
         body-size (if body-stream (alength body-bytes) 0)
         request (if body-stream (assoc request :body (java.io.ByteArrayInputStream. body-bytes)) request)]
         (if (< max-body-size body-size)
@@ -425,16 +485,16 @@
   (ring/ring-handler
    (ring/router
     (routes cfg storage)
-    {:data {:muuntaja m/instance
+    {:data {:muuntaja muuntaja/instance
             :coercion (reitit.coercion.malli/create
                        {:error-keys #{:in :humanized}
                         :compile mu/open-schema
                         :default-values true})
             :middleware [swagger/swagger-feature
                          parameters/parameters-middleware
-                         muuntaja/format-negotiate-middleware
+                         muuntaja-middleware/format-negotiate-middleware
                          ;; end of response middleware
-                         muuntaja/format-response-middleware
+                         muuntaja-middleware/format-response-middleware
                          (exception/create-exception-middleware
                           (assoc exception/default-handlers
                                  ;; replace default handler with ours
@@ -442,7 +502,7 @@
                                  default-exception-handler))
                          (body-size-limiter-middleware (:max-body-size cfg))
                          cors-middleware
-                         muuntaja/format-request-middleware
+                         muuntaja-middleware/format-request-middleware
                          coercion/coerce-response-middleware
                          coercion/coerce-request-middleware]}})
    (ring/routes

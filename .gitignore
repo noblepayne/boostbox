@@ -1,11 +1,12 @@
+boosts
 .calva
 .clj-kondo
 .cpcache
-.env
 .devenv
+.env
+logs.test.txt
 .lsp
 .nrepl-port
 result
 *.tar*
-boosts
-logs.test.txt
+target

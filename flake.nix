@@ -24,6 +24,31 @@
         config.allowUnfree = true;
       };
     in {
+      testenv = devenv.lib.mkShell {
+        inherit inputs pkgs;
+        modules = [
+          (
+            {
+              config,
+              pkgs,
+              ...
+            }: {
+              packages = [
+                pkgs.clojure
+              ];
+              services.minio = {
+                enable = true;
+                accessKey = "s3accesskey";
+                secretKey = "s3secretkey";
+                buckets = ["testbucket"];
+              };
+              env = {
+                ENV = "DEV";
+              };
+            }
+          )
+        ];
+      };
       default = devenv.lib.mkShell {
         inherit inputs pkgs;
         modules = [
@@ -51,6 +76,12 @@
               ];
 
               languages.clojure.enable = true;
+              services.minio = {
+                enable = true;
+                accessKey = "s3accesskey";
+                secretKey = "s3secretkey";
+                buckets = ["testbucket"];
+              };
 
               # N.B. picks up quotes and inline comments
               dotenv.enable = true;
