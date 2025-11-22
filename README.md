@@ -10,6 +10,7 @@ Demo: [boostbox.noblepayne.com](https://boostbox.noblepayne.com)
 
 Demo Boost: [01K9RJ1ZDFE2GV7Z0VKDVT3V6M](https://boostbox.noblepayne.com/boost/01K9RJ1ZDFE2GV7Z0VKDVT3V6M)
 
+![Demo GIF (Jeff)](images/demo.gif)
 ______________________________________________________________________
 
 ## What is BoostBox?
