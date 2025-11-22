@@ -56,8 +56,8 @@ jobs:
         run: |
           IMAGE=${{ steps.load.outputs.image }}
           TARGET=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # Apply all generated tags
-          for tag in ${{ steps.meta.outputs.tags }}; do
+          # read tags safely (handles spaces/newlines)
+          echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n' | while read -r tag; do
             echo "Tagging $IMAGE as $tag"
             docker tag "$IMAGE" "$tag"
             docker push "$tag"
