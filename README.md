@@ -97,7 +97,47 @@ nix run github:noblepayne/boostbox
 
 This will start the server on `http://localhost:8080` with default settings.
 
-### Option 2: Build and Run Locally with Nix
+### Option 2: Docker
+
+**1. Quick Start (Pre-built Image)**
+
+You can run the latest version directly from the container registry without building it yourself.
+
+First, set up your configuration by copying one of the provided templates to a `.env` file:
+
+- **Filesystem Storage (Simplest):** `cp env.fs.template .env`
+- **S3 Storage:** `cp env.s3.template .env` (edit to add your credentials)
+
+Then run the container:
+
+```sh
+docker run -p 8080:8080 --env-file .env --name boostbox ghcr.io/noblepayne/boostbox:latest
+```
+
+**2. Using Docker Compose**
+
+If you prefer Compose, ensure your `.env` file is created (as above), then update the `image` in `docker-compose.yml` to `ghcr.io/noblepayne/boostbox:latest` and run:
+
+```sh
+docker-compose up
+```
+
+**3. Build from Source (Nix)**
+
+If you prefer to build the container locally using Nix:
+
+```sh
+git clone https://github.com/noblepayne/boostbox && cd boostbox
+nix build .#container && docker load < ./result
+```
+
+Then run using the local tag:
+
+```sh
+docker run -p 8080:8080 --env-file .env --name boostbox boostbox
+```
+
+### Option 3: Build and Run Locally with Nix
 
 1. Clone the repository: `git clone https://github.com/noblepayne/boostbox`
 1. Change into the directory: `cd boostbox`
@@ -106,7 +146,7 @@ This will start the server on `http://localhost:8080` with default settings.
 
 Configure via environment variables (see Configuration section below).
 
-### Option 3: Develop with Nix
+### Option 4: Develop with Nix
 
 For REPL-oriented development with Calva (VSCode):
 
@@ -116,29 +156,6 @@ For REPL-oriented development with Calva (VSCode):
 1. VSCode will launch automatically with Calva pre-configured
 1. Configure via environment variables (see Configuration section below)
 1. Use Calva to connect to the NREPL and start developing
-
-### Option 4: Docker
-
-Build the container:
-
-```sh
-git clone https://github.com/noblepayne/boostbox && cd boostbox
-nix build .#container && docker load < ./result
-```
-
-Then run with a `.env` file:
-
-```sh
-docker run -p 8080:8080 --env-file ./.env --name my-boostbox boostbox
-```
-
-Or use Docker Compose:
-
-```sh
-docker-compose up
-```
-
-Make sure to configure your `.env` file with required environment variables (see Configuration below).
 
 ## Configuration
 
