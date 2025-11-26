@@ -242,6 +242,84 @@
                    ;; Check we received our sent payload plus id.
                    (is (= expected decoded-json))))))))))))
 
+
+(deftest test-oscar-fountain-boost
+  (run-with-storage
+   ["FS" "S3"]
+   (fn [data]
+     (testing "Oscar's real Fountain boost - extra fields, nulls, and case handling"
+       (let [base-url (-> data :config :base-url)
+             api-key (-> data :config :allowed-keys first)
+             ;; Oscar's actual boost with extras and nulls
+             oscar-boost {:action "BOOST"  ; uppercase to test normalization
+                          :split 0.05
+                          :message "Test Boost 2 👀👀👀👀👀👀"
+                          :link "https://fountain.fm/episode/JCIzq3VyFKQVkEzVNA8v?payment=5XIAt66P29Iv6rjSTZUB"
+                          :app_name "Fountain"
+                          :sender_id "hIWsCYxdBJzlDvu5zpT3"
+                          :sender_name "merryoscar@fountain.fm"
+                          :sender_npub "npub1unmftuzmkpdjxyj4en8r63cm34uuvjn9hnxqz3nz6fls7l5jzzfqtvd0j2"
+                          :recipient_address "ericpp@getalby.com"
+                          :value_msat 50000
+                          :value_usd 0.049998
+                          :value_msat_total 1000000
+                          :timestamp "2025-11-07T14:36:23.861Z"
+                          :position 5192
+                          :feed_guid "917393e3-1b1e-5cef-ace4-edaa54e1f810"
+                          :feed_title "Podcasting 2.0"
+                          :item_guid "PC20-240"
+                          :item_title "Episode 240: Open Source = People!"
+                          :publisher_guid nil
+                          :publisher_title nil
+                          :remote_feed_guid nil
+                          :remote_item_guid nil
+                          :remote_publisher_guid nil}
+
+             post-resp (http/post (str base-url "/boost")
+                                  {:headers {"x-api-key" api-key
+                                             "Content-Type" "application/json"}
+                                   :body (json/write-value-as-string oscar-boost)
+                                   :throw false})]
+
+         (is (= 201 (:status post-resp)) "Should accept Oscar's boost")
+
+         (let [post-body (json/read-value (:body post-resp))
+               boost-id (get post-body "id")]
+           (when boost-id
+             (let [
+               boost-url (get post-body "url")
+               get-resp (http/get boost-url {:throw false})
+               header (get-in get-resp [:headers "x-rss-payment"])
+               decoded (-> header
+                           (java.net.URLDecoder/decode "UTF-8")
+                           (json/read-value))]
+
+           (is (= 200 (:status get-resp)) "GET should return 200")
+
+           ;; Verify normalization
+           (is (= "boost" (get decoded "action"))
+               "Action should be lowercased from BOOST")
+
+           ;; Verify extra fields pass through (not in schema)
+           (is (= "https://fountain.fm/episode/JCIzq3VyFKQVkEzVNA8v?payment=5XIAt66P29Iv6rjSTZUB"
+                  (get decoded "link"))
+               "Extra field 'link' should be preserved")
+           (is (= "npub1unmftuzmkpdjxyj4en8r63cm34uuvjn9hnxqz3nz6fls7l5jzzfqtvd0j2"
+                  (get decoded "sender_npub"))
+               "Extra field 'sender_npub' should be preserved")
+
+           ;; Verify null handling
+           (is (nil? (get decoded "publisher_guid"))
+               "Null values should be preserved")
+           (is (nil? (get decoded "remote_feed_guid"))
+               "Multiple null fields should be preserved")
+
+           ;; Verify HTML renders without errors
+           (is (str/includes? (:body get-resp) "Boost Details")
+               "HTML view should render successfully")
+           (is (str/includes? (:body get-resp) "Test Boost 2")
+               "HTML should show the message")))))))))
+
 ;; --- Unhappy Path Smoke Tests ---
 
 (deftest smoke-test-413-payload-too-large
