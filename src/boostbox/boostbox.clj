@@ -236,33 +236,34 @@
    ;; provided by us
    #_[:id {:optional true} :string]
    ;; provided by boost client
-   [:action [:enum :boost :stream]]
+   [:action {:decode/json str/lower-case
+             :decode/string str/lower-case} [:enum "boost" "stream"]]
    [:split {:json-schema/default 1.0} [:double {:min 0.0}]]
    [:value_msat {:json-schema/default 2222000} [:int {:min 1}]]
    [:value_msat_total {:json-schema/default 2222000} [:int {:min 1}]]
    [:timestamp {:json-schema/default (java.time.Instant/now)}
     [:and :string
      [:fn {:error/message "must be ISO-8601"} valid-iso8601?]]]
-   ;; optional  keys
-   [:group {:optional true} :string]
-   [:message {:optional true :json-schema/default "row of ducks"} :string]
-   [:app_name {:optional true} :string]
-   [:app_version {:optional true} :string]
-   [:sender_id {:optional true} :string]
-   [:sender_name {:optional true} :string]
-   [:recipient_name {:optional true} :string]
-   [:recipient_address {:optional true} :string]
-   [:value_usd {:optional true} [:double {:min 0.0}]]
-   [:position {:optional true} :int]
-   [:feed_guid {:optional true} :string]
-   [:feed_title {:optional true} :string]
-   [:item_guid {:optional true} :string]
-   [:item_title {:optional true} :string]
-   [:publisher_guid {:optional true} :string]
-   [:publisher_title {:optional true} :string]
-   [:remote_feed_guid {:optional true} :string]
-   [:remote_item_guid {:optional true} :string]
-   [:remote_publisher_guid {:optional true} :string]])
+   ;; optional keys
+   [:group {:optional true} [:maybe :string]]
+   [:message {:optional true :json-schema/default "row of ducks"} [:maybe :string]]
+   [:app_name {:optional true} [:maybe :string]]
+   [:app_version {:optional true} [:maybe :string]]
+   [:sender_id {:optional true} [:maybe :string]]
+   [:sender_name {:optional true} [:maybe :string]]
+   [:recipient_name {:optional true} [:maybe :string]]
+   [:recipient_address {:optional true} [:maybe :string]]
+   [:value_usd {:optional true} [:maybe [:double {:min 0.0}]]]
+   [:position {:optional true} [:maybe :int]]
+   [:feed_guid {:optional true} [:maybe :string]]
+   [:feed_title {:optional true} [:maybe :string]]
+   [:item_guid {:optional true} [:maybe :string]]
+   [:item_title {:optional true} [:maybe :string]]
+   [:publisher_guid {:optional true} [:maybe :string]]
+   [:publisher_title {:optional true} [:maybe :string]]
+   [:remote_feed_guid {:optional true} [:maybe :string]]
+   [:remote_item_guid {:optional true} [:maybe :string]]
+   [:remote_publisher_guid {:optional true} [:maybe :string]]])
 
 ;; ~~~~~~~~~~~~~~~~~~~ GET View ~~~~~~~~~~~~~~~~~~~
 (defn encode-header [data]
@@ -292,7 +293,7 @@
   (let [boost-id (get data "id")
         json-pretty (json/write-value-as-string data (json/object-mapper {:pretty true}))
         sender-name (get data "sender_name")
-        value-msats (get data "value_msat")
+        value-msats (get data "value_msat_total")
         sats (format-sats value-msats)
         feed-title (get data "feed_title")
         item-title (get data "item_title")
@@ -390,7 +391,7 @@
     (str "rss::payment::" action " " url)))
 
 (defn add-boost [cfg storage]
-  (fn [{:keys [:body-params] :as request}]
+  (fn [{{body-params :body} :parameters :as request}]
     (let [id (gen-ulid)
           url (str (:base-url cfg) "/boost/" id)
           boost (assoc body-params :id id)
@@ -489,6 +490,7 @@
             :coercion (reitit.coercion.malli/create
                        {:error-keys #{:in :humanized}
                         :compile mu/open-schema
+                        :strip-extra-keys false
                         :default-values true})
             :middleware [swagger/swagger-feature
                          parameters/parameters-middleware
@@ -531,14 +533,11 @@
       (assoc-in response [:headers "x-correlation-id"] correlation-id))))
 
 (defn mulog-wrapper [handler]
-  (fn [{:keys [:request-method :uri :query-params :path-params :body-params :correlation-id] :as request}]
+  (fn [{:keys [:request-method :uri :correlation-id] :as request}]
     (u/trace ::http-request
              {:pairs [:correlation-id correlation-id
                       :method request-method
-                      :uri uri
-                      :query-params query-params
-                      :path-params path-params
-                      :body-params body-params]
+                      :uri uri]
               :capture (fn [{:keys [:status ::exception] :as response}]
                          (let [success (< status 400)
                                base {:status status
