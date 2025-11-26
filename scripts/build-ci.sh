@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 # TODO: assumes nix, tar, curl (m2), ln, unlink
 
 SYSTEM=$(nix eval --raw --impure --expr "builtins.currentSystem")
@@ -26,8 +28,8 @@ nix print-dev-env --impure .#testenv >staging/root/shell.sh
 nix path-info --impure -r .#devShells."$SYSTEM".testenv | xargs -P0 -I {} cp -r {} staging/nix/store
 
 echo "~~~ find & replace ~~~"
-./scripts/replace.sh "$PWD" "/tmp/boostbox"
-./scripts/replace.sh "$XDG_RUNTIME_DIR" "/tmp/boostbox"
+./scripts/replace.sh "$PWD" "/tmp/boostbox" staging
+./scripts/replace.sh "$XDG_RUNTIME_DIR" "/tmp/boostbox" staging
 
 echo "~~~ tar ~~~"
 tar -cf deps.tar -C staging .

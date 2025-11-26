@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 # TODO: needs rg, sed
 
 # Script to recursively find and replace two values in files using ripgrep
@@ -34,7 +36,7 @@ REPLACE_ESCAPED=$(escape_for_sed "$REPLACE")
 # Use ripgrep to find all files containing the search term
 # -l: list files only, automatically skips binary files
 # --fixed-strings: treat pattern as literal string, not regex
-rg -l --fixed-strings -- "$SEARCH" "$DIR" | while read -r file; do
+rg --no-ignore -l --fixed-strings -- "$SEARCH" "$DIR" | while read -r file; do
 	echo "Processing: $file"
 
 	# Use sed with escaped delimiters for safe in-place replacement
