@@ -8,9 +8,10 @@ A simple, lightweight, and self-hostable API for storing and retrieving [Podcast
 
 Demo: [boostbox.noblepayne.com](https://boostbox.noblepayne.com)
 
-Demo Boost: [01K9RJ1ZDFE2GV7Z0VKDVT3V6M](https://boostbox.noblepayne.com/boost/01K9RJ1ZDFE2GV7Z0VKDVT3V6M)
+Demo Boost: [01KB19TNRVE1RVQCXVFWY68PYG](https://boostbox.noblepayne.com/boost/01KB19TNRVE1RVQCXVFWY68PYG)
 
 ![Demo GIF (Jeff)](images/demo.gif)
+
 ______________________________________________________________________
 
 ## What is BoostBox?
@@ -32,7 +33,7 @@ The process is designed to be as simple as possible for podcast app developers.
 Your app gathers all the boostagram metadata and sends it as a JSON object to the `/boost` endpoint.
 
 ```sh
-curl -X POST https://your-boostbox-instance.com/boost \
+curl -X POST https://boostbox.noblepayne.com/boost \
   -H "Content-Type: application/json" \
   -H "X-Api-Key: v4v4me" \
   -d '{
@@ -58,8 +59,8 @@ BoostBox stores the metadata and returns a URL and a pre-formatted BOLT11 descri
 ```json
 {
   "id": "01K9R9E2JNE1CR0ME6CFM45T8E",
-  "url": "http://localhost:8080/boost/01K9R9E2JNE1CR0ME6CFM45T8E",
-  "desc": "rss::payment::boost http://localhost:8080/boost/01K9R9E2JNE1CR0ME6CFM45T8E Best episode ever!"
+  "url": "https://boostbox.noblepayne.com/boost/01K9R9E2JNE1CR0ME6CFM45T8E",
+  "desc": "rss::payment::boost https://boostbox.noblepayne.com/boost/01K9R9E2JNE1CR0ME6CFM45T8E Best episode ever!"
 }
 ```
 
@@ -72,10 +73,10 @@ Your app uses the `desc` field from the response as the description when paying 
 When the podcaster's receiving service (like Helipad, Alby, etc.) gets the payment, it can fetch the URL from the description. BoostBox will respond with the full, original metadata in the `x-rss-payment` HTTP header.
 
 ```sh
-curl -v "http://localhost:8080/boost/01K9R9E2JNE1CR0ME6CFM45T8E"
+curl -v "http://boostbox.noblepayne.com/boost/01K9R9E2JNE1CR0ME6CFM45T8E"
 
 > GET /boost/01K9R9E2JNE1CR0ME6CFM45T8E HTTP/1
-> Host: your-boostbox-instance.com
+> Host: boostbox.noblepayne.com
 ...
 
 < HTTP/1 200
@@ -241,7 +242,7 @@ Stores boostagram metadata.
   ```json
   {
     "id": "01K9R9E2JNE1CR0ME6CFM45T8E",
-    "url": "https://your-boostbox-instance.com/boost/01K9R9E2JNE1CR0ME6CFM45T8E",
+    "url": "https://noblepayne.boostbox.com/boost/01K9R9E2JNE1CR0ME6CFM45T8E",
     "desc": "rss::payment::boost https://your-boostbox-instance.com/boost/01K9R9E2JNE1CR0ME6CFM45T8E Your message here"
   }
   ```
