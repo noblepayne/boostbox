@@ -1,195 +1,164 @@
+# BoostBox
+
 <div align="center">
   <img src="./images/v4vbox.png" alt="3D box with 'V4V' on one side." width="128">
 </div>
 
-# BoostBox
+**A simple, lightweight, and self-hostable sidecar service for storing and serving [Podcasting 2.0](https://podcasting2.org/) payment metadata.**
 
-A simple, lightweight, and self-hostable API for storing and retrieving [Podcasting 2.0](https://podcasting2.org/) payment metadata.
+BoostBox bridges the gap between **Lightning Address** payments (which have character limits) and rich **Value4Value metadata** (which can be large).
 
-Demo: [boostbox.noblepayne.com](https://boostbox.noblepayne.com)
-
-Demo Boost: [01K9RJ1ZDFE2GV7Z0VKDVT3V6M](https://boostbox.noblepayne.com/boost/01K9RJ1ZDFE2GV7Z0VKDVT3V6M)
-
-![Demo GIF (Jeff)](images/demo.gif)
 ______________________________________________________________________
 
-## What is BoostBox?
+## Background & Motivation
 
-BoostBox provides a simple API that implements a developing standard for [transmitting payment metadata via HTTP headers](https://github.com/Podcastindex-org/podcast-namespace/pull/734). It allows an application to:
+While **Keysend** was the original method for Podcasting 2.0 payments, the **Lightning Address** has become the de-facto standard for sharing payment information because it is supported by popular wallets like Strike, CashApp, and Wallet of Satoshi.
 
-1. Store the full JSON metadata payload with a single `POST` request.
-1. Receive a short, stable URL in return.
-1. Place this URL into the Lightning invoice description.
+**The Problem:**
+Lightning Address payments use the BOLT11 invoice format, which effectively limits descriptions to ~200 characters. This is not enough space to carry the full rich JSON metadata (Sender info, Episode GUIDs, App version, custom messages) required for a full Value4Value experience.
 
-This ensures the link to the original boost metadata is preserved with the payment, enabling the full [Value4Value](https://podcasting2.org/docs/podcast-namespace/tags/value) experience.
+**The Solution:**
+As proposed by the [Podcasting 2.0 community](https://github.com/Podcastindex-org/podcast-namespace/pull/734), the solution is a "Sidecar" approach:
+
+1. **Store** the heavy JSON metadata on a server (BoostBox).
+1. **Generate** a short, stable URL.
+1. **Embed** that URL into the Lightning invoice description using a specific prefix: `rss::payment::{action} {url} {truncated message}`.
+1. **Serve** the full metadata via the `x-rss-payment` HTTP header when the receiving wallet checks that URL.
+
+**BoostBox is the server implementation of this spec.** It allows any app developer or hobbyist to run their own metadata endpoint without needing to build a custom database or API.
+
+______________________________________________________________________
 
 ## How It Works
 
-The process is designed to be as simple as possible for podcast app developers.
+### 1. Store the Metadata
 
-### Step 1: POST Metadata to BoostBox
+Your Podcast App gathers the full boostagram metadata (Sender, App Name, Feed GUID, etc.) and `POST`s it to your BoostBox instance.
 
-Your app gathers all the boostagram metadata and sends it as a JSON object to the `/boost` endpoint.
+**Request:**
 
 ```sh
-curl -X POST https://your-boostbox-instance.com/boost \
+curl -X POST https://boostbox.noblepayne.com/boost) \
   -H "Content-Type: application/json" \
   -H "X-Api-Key: v4v4me" \
   -d '{
     "action": "boost",
-    "split": 1, 
-    "value_msat": 639000,
-    "value_msat_total": 639000,
-    "timestamp": "2025-11-02T16:30:00Z",
-    "app_name": "My Awesome Player",
+    "value_msat": 25000,
     "sender_name": "Satoshi",
-    "message": "Best episode ever!",
+    "message": "Great episode! This solved my node sync issues.",
     "feed_guid": "72d5e069-f907-5ee7-b0d7-45404f4f0aa5",
-    "feed_title": "LINUX Unplugged",
-    "item_guid": "4c0a537d-10c6-40ca-b44c-9a43891313c6",
-    "item_title": "639: The Mess Machine"
+    "app_name": "PodTester",
+    "timestamp": "2025-11-25T15:09:10.174Z"
   }'
 ```
 
-### Step 2: Get the Response
+### 2. Receive the Invoice Description
 
-BoostBox stores the metadata and returns a URL and a pre-formatted BOLT11 description.
+BoostBox saves the JSON to storage (Filesystem or S3) and returns a short URL and a pre-formatted description string ready for the Lightning Invoice.
+
+**Response:**
 
 ```json
 {
-  "id": "01K9R9E2JNE1CR0ME6CFM45T8E",
-  "url": "http://localhost:8080/boost/01K9R9E2JNE1CR0ME6CFM45T8E",
-  "desc": "rss::payment::boost http://localhost:8080/boost/01K9R9E2JNE1CR0ME6CFM45T8E Best episode ever!"
+  "id": "01KB19TNRVE1RVQCXVFWY68PYG",
+  "url": "https://boostbox.noblepayne.com/boost/01KB19TNRVE1RVQCXVFWY68PYG",
+  "desc": "rss::payment::boost https://boostbox.noblepayne.com/boost/01KB19TNRVE1RVQCXVFWY68PYG Great episode!..."
 }
 ```
 
-### Step 3: Pay the Invoice
+### 3. Send the Payment
 
-Your app uses the `desc` field from the response as the description when paying the podcaster's Lightning Address invoice.
+Your App sends the Lightning payment using the `desc` string from the response. The truncated message ensures the user sees context, while the URL points to the full data.
 
-### Step 4: Metadata is Preserved
+### 4. Metadata is Preserved
 
-When the podcaster's receiving service (like Helipad, Alby, etc.) gets the payment, it can fetch the URL from the description. BoostBox will respond with the full, original metadata in the `x-rss-payment` HTTP header.
+When the podcaster's wallet (e.g., Helipad, Alby) receives the payment, it detects the `rss::payment::` prefix, fetches the URL, and BoostBox returns the full metadata in the `x-rss-payment` header.
 
-```sh
-curl -v "http://localhost:8080/boost/01K9R9E2JNE1CR0ME6CFM45T8E"
+______________________________________________________________________
 
-> GET /boost/01K9R9E2JNE1CR0ME6CFM45T8E HTTP/1
-> Host: your-boostbox-instance.com
-...
+## Deployment Options
 
-< HTTP/1 200
-< content-type: text/html; charset=UTF-8
-< x-rss-payment: %7B%22message%22%3A%22Best%20episode%...
-...
+BoostBox is built with **Clojure** and **Nix**, making it incredibly lightweight and robust.
 
-<!-- The page body will show a human-readable view of the metadata -->
+### 🐳 Docker (Quick Start)
+
+The easiest way to run BoostBox.
+
+**1. Create configuration:**
+
+```bash
+# For local filesystem storage
+cp env.fs.template .env
+# OR for S3 storage
+cp env.s3.template .env
 ```
 
-## Getting Started
+**2. Run container:**
 
-### Option 1: Run Directly with Nix (No Cloning)
-
-If you have [Nix](https://nixos.org/download.html) installed with flakes support, you can run BoostBox directly without cloning the repository:
-
-```sh
-nix run github:noblepayne/boostbox
-```
-
-This will start the server on `http://localhost:8080` with default settings.
-
-### Option 2: Docker
-
-**1. Quick Start (Pre-built Image)**
-
-You can run the latest version directly from the container registry without building it yourself.
-
-First, set up your configuration by copying one of the provided templates to a `.env` file:
-
-- **Filesystem Storage (Simplest):** `cp env.fs.template .env`
-- **S3 Storage:** `cp env.s3.template .env` (edit to add your credentials)
-
-Then run the container:
-
-```sh
+```bash
 docker run -p 8080:8080 --env-file .env --name boostbox ghcr.io/noblepayne/boostbox:latest
 ```
 
-**2. Using Docker Compose**
+### 🐳 Docker Compose
 
 If you prefer Compose, ensure your `.env` file is created (as above), then update the `image` in `docker-compose.yml` to `ghcr.io/noblepayne/boostbox:latest` and run:
 
-```sh
+```bash
 docker-compose up
 ```
 
-**3. Build from Source (Nix)**
+### ❄️ Nix (Run Directly)
 
-If you prefer to build the container locally using Nix:
+If you have Nix installed with flakes:
 
-```sh
+```bash
+nix run github:noblepayne/boostbox
+```
+
+### 🛠 Build from Source
+
+```bash
 git clone https://github.com/noblepayne/boostbox && cd boostbox
-nix build .#container && docker load < ./result
+nix build
+./result/bin/boostbox
 ```
 
-Then run using the local tag:
-
-```sh
-docker run -p 8080:8080 --env-file .env --name boostbox boostbox
-```
-
-### Option 3: Build and Run Locally with Nix
-
-1. Clone the repository: `git clone https://github.com/noblepayne/boostbox`
-1. Change into the directory: `cd boostbox`
-1. Build: `nix build`
-1. Run: `./result/bin/boostbox`
-
-Configure via environment variables (see Configuration section below).
-
-### Option 4: Develop with Nix
-
-For REPL-oriented development with Calva (VSCode):
-
-1. Clone the repository: `git clone https://github.com/noblepayne/boostbox`
-1. Change into the directory: `cd boostbox`
-1. Enter the development environment: `./dev.sh`
-1. VSCode will launch automatically with Calva pre-configured
-1. Configure via environment variables (see Configuration section below)
-1. Use Calva to connect to the NREPL and start developing
+______________________________________________________________________
 
 ## Configuration
 
-Configuration is handled via environment variables.
+Configuration is managed via environment variables.
 
-### Core Configuration
+### Core Settings
 
-| Variable | Required | Default | Description |
-| -------------------- | :------: | --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `ENV` | No | `DEV` | The runtime environment: `DEV`, `STAGING`, or `PROD`. |
-| `BB_PORT` | No | `8080` | The port the webserver will listen on. |
-| `BB_BASE_URL` | No | `http://localhost:8080` | The public base URL of the service (e.g., `https://my-boostbox.com`). Used to construct response URLs. |
-| `BB_ALLOWED_KEYS` | No | `v4v4me` | Comma-separated list of API keys clients must provide in the `X-Api-Key` header to use the `POST /boost` endpoint. |
-| `BB_MAX_BODY` | No | `102400` | Maximum allowed size for request bodies in bytes (approximately 100KB by default). |
-| `BB_STORAGE` | No | `FS` | The backend for storing metadata: `FS` (filesystem) or `S3`. |
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `ENV` | `DEV` | `DEV`, `STAGING`, or `PROD` |
+| `BB_PORT` | `8080` | HTTP listening port |
+| `BB_BASE_URL` | `http://localhost:8080` | Public URL used to generate response links |
+| `BB_ALLOWED_KEYS` | `v4v4me` | Comma-separated list of API keys for `POST` access |
+| `BB_MAX_BODY` | `102400` | Maximum allowed size for request bodies in bytes (approx 100KB) |
+| `BB_STORAGE` | `FS` | `FS` (Filesystem) or `S3` |
 
-### Filesystem Storage Configuration
+### Storage Backends
 
-| Variable | Required | Default | Description |
-| -------------------- | :------: | --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `BB_FS_ROOT_PATH` | No | `boosts` | If `BB_STORAGE=FS`, the root directory where metadata files will be stored. |
+**Filesystem (`BB_STORAGE=FS`)**
+Ideal for self-hosting or simple deployments.
 
-### S3 Storage Configuration
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `BB_FS_ROOT_PATH` | `boosts` | Directory to store JSON files |
 
-To use S3 storage (AWS S3, MinIO, or compatible), set `BB_STORAGE=S3` and configure the following:
+**S3 / MinIO (`BB_STORAGE=S3`)**
+Ideal for production or scalable deployments.
 
-| Variable | Required | Default | Description |
-| -------------------- | :------: | --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `BB_S3_ENDPOINT` | Yes | N/A | The S3 endpoint URL (e.g., `https://s3.amazonaws.com` or `http://localhost:9000` for MinIO). Must include protocol. |
-| `BB_S3_REGION` | Yes | N/A | AWS region (e.g., `us-east-1`). |
-| `BB_S3_ACCESS_KEY` | Yes | N/A | S3 access key ID. |
-| `BB_S3_SECRET_KEY` | Yes | N/A | S3 secret access key. |
-| `BB_S3_BUCKET` | Yes | N/A | S3 bucket name. |
+| Variable | Description |
+| :--- | :--- |
+| `BB_S3_ENDPOINT` | The S3 endpoint URL (e.g. `https://s3.amazonaws.com` or `http://localhost:9000`). Must include protocol. |
+| `BB_S3_REGION` | AWS region (e.g., `us-east-1`) |
+| `BB_S3_ACCESS_KEY` | S3 access key ID |
+| `BB_S3_SECRET_KEY` | S3 secret access key |
+| `BB_S3_BUCKET` | S3 bucket name |
 
 ### S3 Setup Examples
 
@@ -216,47 +185,47 @@ export BB_S3_BUCKET=boostbox
 ./result/bin/boostbox
 ```
 
-The included `flake.nix` dev environment provides MinIO. Run `devenv up` to start it for manual testing. This is done automatically for `./tests.sh`.
+______________________________________________________________________
 
-## API Quick Reference
+## API Reference
 
 ### `POST /boost`
 
-Stores boostagram metadata.
+Stores metadata and returns the invoice description.
 
-- **Authentication:** Requires an API key in the `X-Api-Key` header (default: `v4v4me`).
-
-- **Request Body:** A JSON object with the following **required** fields:
-
+- **Headers:** `X-Api-Key` required.
+- **Body:** A JSON object with the following **required** fields:
   - `action` (enum: `boost` or `stream`)
   - `split` (number, min 0.0)
   - `value_msat` (integer, min 1)
   - `value_msat_total` (integer, min 1)
   - `timestamp` (ISO-8601 string)
+- **Optional fields:** `sender_name`, `feed_guid`, `app_name`, `message`, etc.
+- **Returns:** `201 Created` with `id`, `url`, and `desc`.
 
-  Optional fields include: `group`, `message`, `app_name`, `app_version`, `sender_id`, `sender_name`, `recipient_name`, `recipient_address`, `value_usd`, `position`, `feed_guid`, `feed_title`, `item_guid`, `item_title`, `publisher_guid`, `publisher_title`, `remote_feed_guid`, `remote_item_guid`, `remote_publisher_guid`.
+**Example Success Response:**
 
-- **Success Response (`201 Created`):**
+```json
+{
+  "id": "01KB19TNRVE1RVQCXVFWY68PYG",
+  "url": "[https://boostbox.noblepayne.com/boost/01KB19TNRVE1RVQCXVFWY68PYG](https://boostbox.noblepayne.com/boost/01KB19TNRVE1RVQCXVFWY68PYG)",
+  "desc": "rss::payment::boost [https://boostbox.noblepayne.com/boost/01KB19TNRVE1RVQCXVFWY68PYG](https://boostbox.noblepayne.com/boost/01KB19TNRVE1RVQCXVFWY68PYG) Your message here"
+}
+```
 
-  ```json
-  {
-    "id": "01K9R9E2JNE1CR0ME6CFM45T8E",
-    "url": "https://your-boostbox-instance.com/boost/01K9R9E2JNE1CR0ME6CFM45T8E",
-    "desc": "rss::payment::boost https://your-boostbox-instance.com/boost/01K9R9E2JNE1CR0ME6CFM45T8E Your message here"
-  }
-  ```
+**Error Responses:**
 
-- **Error Responses:**
-
-  - `400 Bad Request` - Invalid or missing required fields
-  - `401 Unauthorized` - Missing or invalid `X-Api-Key` header
-  - `413 Payload Too Large` - Request body exceeds `BB_MAX_BODY` limit
+- `400 Bad Request` - Invalid or missing required fields
+- `401 Unauthorized` - Missing or invalid `X-Api-Key` header
+- `413 Payload Too Large` - Request body exceeds `BB_MAX_BODY` limit
 
 ### `GET /boost/{id}`
 
-Retrieves boostagram metadata.
+Retrieves metadata.
 
-- **Response:** Returns an HTML page for human-readable display. The full metadata JSON is also available in the `x-rss-payment` HTTP header (URL-encoded).
+- **Response:**
+  - **Body:** Human-readable HTML page showing the boost details.
+  - **Header `x-rss-payment`:** URL-encoded JSON string containing the full metadata.
 - **Status Codes:**
   - `200 OK` - Metadata found
   - `404 Not Found` - Unknown boost ID
@@ -267,10 +236,20 @@ A simple healthcheck endpoint for monitoring.
 
 - **Response:** `{"status": "ok"}`
 
-### Full API Documentation
+### `GET /docs`
 
-A complete OpenAPI/Swagger specification can be viewed at the `/docs` endpoint of a running instance. The raw OpenAPI JSON is available at `/openapi.json`.
+Full OpenAPI/Swagger documentation.
 
 ______________________________________________________________________
 
-Built with Nix and Clojure. Licensed under the MIT License.
+## Development
+
+BoostBox includes a full development environment via `devenv`.
+
+```bash
+# Start a REPL, PostgreSQL, MinIO, and other tools
+./dev.sh
+```
+
+Built with ❤️ for the Podcasting 2.0 community.
+Licensed under MIT.
