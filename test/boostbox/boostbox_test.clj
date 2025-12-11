@@ -9,7 +9,6 @@
             [com.brunobonacci.mulog :as u])
   (:import (java.net ServerSocket)))
 
-
 ;; --- S3 ---
 (defn- mock-s3-client
   "A mock client that simulates the cognitect.aws/s3 client behavior. 
@@ -57,7 +56,6 @@
                          (mock-s3-client (atom {})))]
            (bb/->S3Storage client bucket))))
 
-
 (defn- setup-test-server
   "Starts the BoostBox server on a random free port for testing."
   [storage]
@@ -82,8 +80,7 @@
         storage-impl (make-test-storage config)
         server (bb/serve config storage-impl)]
 
-
-    ;; Clean up the temp directory on shutdown
+;; Clean up the temp directory on shutdown
     (when (= storage "FS")
       (.addShutdownHook (Runtime/getRuntime)
                         (Thread. (fn [] (run! io/delete-file (reverse (file-seq tmp-dir)))))))
@@ -173,7 +170,6 @@
           result (bb/bolt11-desc action url long-msg)]
       (is (str/ends-with? result "...")))))
 
-
 ;; --- e2e ---
 (deftest smoke-test-homepage
   (run-with-storage
@@ -242,7 +238,6 @@
                    ;; Check we received our sent payload plus id.
                    (is (= expected decoded-json))))))))))))
 
-
 (deftest test-oscar-fountain-boost
   (run-with-storage
    ["FS" "S3"]
@@ -286,39 +281,38 @@
          (let [post-body (json/read-value (:body post-resp))
                boost-id (get post-body "id")]
            (when boost-id
-             (let [
-               boost-url (get post-body "url")
-               get-resp (http/get boost-url {:throw false})
-               header (get-in get-resp [:headers "x-rss-payment"])
-               decoded (-> header
-                           (java.net.URLDecoder/decode "UTF-8")
-                           (json/read-value))]
+             (let [boost-url (get post-body "url")
+                   get-resp (http/get boost-url {:throw false})
+                   header (get-in get-resp [:headers "x-rss-payment"])
+                   decoded (-> header
+                               (java.net.URLDecoder/decode "UTF-8")
+                               (json/read-value))]
 
-           (is (= 200 (:status get-resp)) "GET should return 200")
+               (is (= 200 (:status get-resp)) "GET should return 200")
 
            ;; Verify normalization
-           (is (= "boost" (get decoded "action"))
-               "Action should be lowercased from BOOST")
+               (is (= "boost" (get decoded "action"))
+                   "Action should be lowercased from BOOST")
 
            ;; Verify extra fields pass through (not in schema)
-           (is (= "https://fountain.fm/episode/JCIzq3VyFKQVkEzVNA8v?payment=5XIAt66P29Iv6rjSTZUB"
-                  (get decoded "link"))
-               "Extra field 'link' should be preserved")
-           (is (= "npub1unmftuzmkpdjxyj4en8r63cm34uuvjn9hnxqz3nz6fls7l5jzzfqtvd0j2"
-                  (get decoded "sender_npub"))
-               "Extra field 'sender_npub' should be preserved")
+               (is (= "https://fountain.fm/episode/JCIzq3VyFKQVkEzVNA8v?payment=5XIAt66P29Iv6rjSTZUB"
+                      (get decoded "link"))
+                   "Extra field 'link' should be preserved")
+               (is (= "npub1unmftuzmkpdjxyj4en8r63cm34uuvjn9hnxqz3nz6fls7l5jzzfqtvd0j2"
+                      (get decoded "sender_npub"))
+                   "Extra field 'sender_npub' should be preserved")
 
            ;; Verify null handling
-           (is (nil? (get decoded "publisher_guid"))
-               "Null values should be preserved")
-           (is (nil? (get decoded "remote_feed_guid"))
-               "Multiple null fields should be preserved")
+               (is (nil? (get decoded "publisher_guid"))
+                   "Null values should be preserved")
+               (is (nil? (get decoded "remote_feed_guid"))
+                   "Multiple null fields should be preserved")
 
            ;; Verify HTML renders without errors
-           (is (str/includes? (:body get-resp) "Boost Details")
-               "HTML view should render successfully")
-           (is (str/includes? (:body get-resp) "Test Boost 2")
-               "HTML should show the message")))))))))
+               (is (str/includes? (:body get-resp) "Boost Details")
+                   "HTML view should render successfully")
+               (is (str/includes? (:body get-resp) "Test Boost 2")
+                   "HTML should show the message")))))))))
 
 ;; --- Unhappy Path Smoke Tests ---
 
@@ -390,7 +384,6 @@
            (is (= 400 (:status get-resp)) "Should return 400")
            (is (= {"humanized" {"id" ["must be valid ULID"]}, "in" ["request" "path-params"]}
                   decoded-body))))))))
-
 
 (comment
   (remove-ns 'boostbox.boostbox-test)

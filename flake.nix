@@ -4,21 +4,42 @@
     devenv.url = "github:cachix/devenv";
     clj-nix.url = "github:jlesquembre/clj-nix";
     clj-nix.inputs.nixpkgs.follows = "nixpkgs";
+    treefmt-nix.url = "github:numtide/treefmt-nix";
+    cljfmt.url = "github:noblepayne/cljfmt-flake";
+    cljfmt.inputs.nixpkgs.follows = "nixpkgs";
   };
   outputs = {
     self,
     nixpkgs,
     devenv,
     clj-nix,
+    treefmt-nix,
+    cljfmt,
     ...
   } @ inputs: let
     supportedSystems = ["x86_64-linux" "aarch64-linux"];
     pkgsBySystem = nixpkgs.lib.getAttrs supportedSystems nixpkgs.legacyPackages;
-    forAllPkgs = fn: nixpkgs.lib.mapAttrs (_: pkgs: (fn pkgs)) pkgsBySystem;
+    forAllPkgs = fn: nixpkgs.lib.mapAttrs (system: pkgs: (fn system pkgs)) pkgsBySystem;
+    # treefmt configuration
+    treefmtEval = forAllPkgs (
+      system: pkgs:
+        treefmt-nix.lib.evalModule pkgs {
+          projectRootFile = "flake.nix";
+          programs.alejandra.enable = true;
+          programs.cljfmt.enable = true;
+          programs.cljfmt.package = cljfmt.packages.${system}.default;
+          programs.prettier.enable = true;
+          programs.mdformat.enable = true;
+        }
+    );
   in {
-    formatter = forAllPkgs (pkgs: pkgs.alejandra);
-    devShells = forAllPkgs (pkgs': let
-      system = pkgs'.stdenv.hostPlatform.system;
+    formatter = forAllPkgs (system: pkgs: treefmtEval.${system}.config.build.wrapper);
+
+    checks = forAllPkgs (system: pkgs: {
+      formatting = treefmtEval.${system}.config.build.check self;
+    });
+
+    devShells = forAllPkgs (system: pkgs': let
       pkgs = import nixpkgs {
         inherit system;
         config.allowUnfree = true;
@@ -59,21 +80,22 @@
               ...
             }: {
               # https://devenv.sh/reference/options/
-              packages = [
-                pkgs.git
-                pkgs.babashka
-                pkgs.jet
-                pkgs.neovim
-                pkgs.cljfmt
-                #pkgs.vscode
-                (pkgs.vscode-with-extensions.override {
-                  vscodeExtensions = [
-                    pkgs.vscode-extensions.betterthantomorrow.calva
-                    pkgs.vscode-extensions.vscodevim.vim
-                    pkgs.vscode-extensions.jnoortheen.nix-ide
-                  ];
-                })
-              ];
+              packages =
+                [
+                  pkgs.git
+                  pkgs.babashka
+                  pkgs.jet
+                  pkgs.neovim
+                  #pkgs.vscode
+                  (pkgs.vscode-with-extensions.override {
+                    vscodeExtensions = [
+                      pkgs.vscode-extensions.betterthantomorrow.calva
+                      pkgs.vscode-extensions.vscodevim.vim
+                      pkgs.vscode-extensions.jnoortheen.nix-ide
+                    ];
+                  })
+                ]
+                ++ (builtins.attrValues treefmtEval.x86_64-linux.config.build.programs);
 
               languages.clojure.enable = true;
               services.minio = {
@@ -155,9 +177,7 @@
       };
     };
 
-    packages = forAllPkgs (pkgs: let
-      system = pkgs.stdenv.hostPlatform.system;
-    in {
+    packages = forAllPkgs (system: pkgs: {
       deps-lock = clj-nix.packages.${system}.deps-lock;
       container = pkgs.dockerTools.buildLayeredImage {
         name = "boostbox";

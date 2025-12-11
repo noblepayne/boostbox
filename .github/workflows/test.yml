@@ -2,9 +2,9 @@ name: Test with Nix
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   test:
@@ -39,6 +39,7 @@ jobs:
         if: steps.cache-restore.outputs.cache-hit != 'true'
         run: |
           ./scripts/build-ci.sh
+          rm -rf build-cache
           mkdir -p build-cache
           cp deps.tar* build-cache
           cp zstd.tar* build-cache

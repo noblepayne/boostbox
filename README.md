@@ -12,7 +12,7 @@ Demo Boost: [01KB19TNRVE1RVQCXVFWY68PYG](https://boostbox.noblepayne.com/boost/0
 
 ![Demo GIF (Jeff)](images/demo.gif)
 
-______________________________________________________________________
+---
 
 ## What is BoostBox?
 
@@ -38,7 +38,7 @@ curl -X POST https://boostbox.noblepayne.com/boost \
   -H "X-Api-Key: v4v4me" \
   -d '{
     "action": "boost",
-    "split": 1, 
+    "split": 1,
     "value_msat": 639000,
     "value_msat_total": 639000,
     "timestamp": "2025-11-02T16:30:00Z",
@@ -165,32 +165,32 @@ Configuration is handled via environment variables.
 
 ### Core Configuration
 
-| Variable | Required | Default | Description |
-| -------------------- | :------: | --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `ENV` | No | `DEV` | The runtime environment: `DEV`, `STAGING`, or `PROD`. |
-| `BB_PORT` | No | `8080` | The port the webserver will listen on. |
-| `BB_BASE_URL` | No | `http://localhost:8080` | The public base URL of the service (e.g., `https://my-boostbox.com`). Used to construct response URLs. |
-| `BB_ALLOWED_KEYS` | No | `v4v4me` | Comma-separated list of API keys clients must provide in the `X-Api-Key` header to use the `POST /boost` endpoint. |
-| `BB_MAX_BODY` | No | `102400` | Maximum allowed size for request bodies in bytes (approximately 100KB by default). |
-| `BB_STORAGE` | No | `FS` | The backend for storing metadata: `FS` (filesystem) or `S3`. |
+| Variable          | Required | Default                 | Description                                                                                                        |
+| ----------------- | :------: | ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `ENV`             |    No    | `DEV`                   | The runtime environment: `DEV`, `STAGING`, or `PROD`.                                                              |
+| `BB_PORT`         |    No    | `8080`                  | The port the webserver will listen on.                                                                             |
+| `BB_BASE_URL`     |    No    | `http://localhost:8080` | The public base URL of the service (e.g., `https://my-boostbox.com`). Used to construct response URLs.             |
+| `BB_ALLOWED_KEYS` |    No    | `v4v4me`                | Comma-separated list of API keys clients must provide in the `X-Api-Key` header to use the `POST /boost` endpoint. |
+| `BB_MAX_BODY`     |    No    | `102400`                | Maximum allowed size for request bodies in bytes (approximately 100KB by default).                                 |
+| `BB_STORAGE`      |    No    | `FS`                    | The backend for storing metadata: `FS` (filesystem) or `S3`.                                                       |
 
 ### Filesystem Storage Configuration
 
-| Variable | Required | Default | Description |
-| -------------------- | :------: | --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `BB_FS_ROOT_PATH` | No | `boosts` | If `BB_STORAGE=FS`, the root directory where metadata files will be stored. |
+| Variable          | Required | Default  | Description                                                                 |
+| ----------------- | :------: | -------- | --------------------------------------------------------------------------- |
+| `BB_FS_ROOT_PATH` |    No    | `boosts` | If `BB_STORAGE=FS`, the root directory where metadata files will be stored. |
 
 ### S3 Storage Configuration
 
 To use S3 storage (AWS S3, MinIO, or compatible), set `BB_STORAGE=S3` and configure the following:
 
-| Variable | Required | Default | Description |
-| -------------------- | :------: | --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `BB_S3_ENDPOINT` | Yes | N/A | The S3 endpoint URL (e.g., `https://s3.amazonaws.com` or `http://localhost:9000` for MinIO). Must include protocol. |
-| `BB_S3_REGION` | Yes | N/A | AWS region (e.g., `us-east-1`). |
-| `BB_S3_ACCESS_KEY` | Yes | N/A | S3 access key ID. |
-| `BB_S3_SECRET_KEY` | Yes | N/A | S3 secret access key. |
-| `BB_S3_BUCKET` | Yes | N/A | S3 bucket name. |
+| Variable           | Required | Default | Description                                                                                                         |
+| ------------------ | :------: | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `BB_S3_ENDPOINT`   |   Yes    | N/A     | The S3 endpoint URL (e.g., `https://s3.amazonaws.com` or `http://localhost:9000` for MinIO). Must include protocol. |
+| `BB_S3_REGION`     |   Yes    | N/A     | AWS region (e.g., `us-east-1`).                                                                                     |
+| `BB_S3_ACCESS_KEY` |   Yes    | N/A     | S3 access key ID.                                                                                                   |
+| `BB_S3_SECRET_KEY` |   Yes    | N/A     | S3 secret access key.                                                                                               |
+| `BB_S3_BUCKET`     |   Yes    | N/A     | S3 bucket name.                                                                                                     |
 
 ### S3 Setup Examples
 
@@ -228,7 +228,6 @@ Stores boostagram metadata.
 - **Authentication:** Requires an API key in the `X-Api-Key` header (default: `v4v4me`).
 
 - **Request Body:** A JSON object with the following **required** fields:
-
   - `action` (enum: `boost` or `stream`)
   - `split` (number, min 0.0)
   - `value_msat` (integer, min 1)
@@ -248,7 +247,6 @@ Stores boostagram metadata.
   ```
 
 - **Error Responses:**
-
   - `400 Bad Request` - Invalid or missing required fields
   - `401 Unauthorized` - Missing or invalid `X-Api-Key` header
   - `413 Payload Too Large` - Request body exceeds `BB_MAX_BODY` limit
@@ -272,6 +270,6 @@ A simple healthcheck endpoint for monitoring.
 
 A complete OpenAPI/Swagger specification can be viewed at the `/docs` endpoint of a running instance. The raw OpenAPI JSON is available at `/openapi.json`.
 
-______________________________________________________________________
+---
 
 Built with Nix and Clojure. Licensed under the MIT License.
